@@ -38,7 +38,7 @@ final class QuickChatController: NSObject {
     /// back to the previous app only if the panel had it.
     func toggle() {
         if let panel, panel.isVisible {
-            hide(restoreFocus: panel.isKeyWindow && NSApp.isActive)
+            hide(restoreFocus: panel.isKeyWindow)
         } else {
             show()
         }
@@ -48,7 +48,8 @@ final class QuickChatController: NSObject {
         let panel = self.panel ?? makePanel()
         let front = NSWorkspace.shared.frontmostApplication
         if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier { previousApp = front }
-        NSApp.activate()
+        // A nonactivating panel takes keyboard focus without activating this accessory app.
+        // Activating the app here can switch away from another app's full-screen Space.
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(webView)
         focusComposer()
@@ -58,7 +59,10 @@ final class QuickChatController: NSObject {
     func hide(restoreFocus: Bool) {
         guard let panel, panel.isVisible else { return }
         panel.orderOut(nil)
-        if restoreFocus { previousApp?.activate() }
+        if restoreFocus, let previousApp,
+           NSWorkspace.shared.frontmostApplication?.processIdentifier != previousApp.processIdentifier {
+            previousApp.activate()
+        }
     }
 
     /// Closes the panel and releases the web view (the sign-in session stays in the data store).
@@ -314,13 +318,16 @@ final class QuickChatPanel: NSPanel {
 
     init(contentRect: NSRect) {
         super.init(contentRect: contentRect,
-                   styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+                   styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel],
                    backing: .buffered, defer: false)
         title = "ChatGPT"
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
-        // No full screen or tiling: the green button shows the plain zoom glyph and only maximizes.
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .fullScreenNone, .fullScreenDisallowsTiling]
+        // Join other apps' full-screen Spaces without becoming a full-screen/tiled window.
+        // fullScreenNone and fullScreenAuxiliary are mutually exclusive. The green button
+        // is still routed to our own maximize action below.
+        collectionBehavior = [.canJoinAllSpaces, .canJoinAllApplications,
+                              .fullScreenAuxiliary, .fullScreenDisallowsTiling]
         for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             standardWindowButton(button)?.isHidden = !Self.trafficLights.contains(button)
         }
